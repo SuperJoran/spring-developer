@@ -30,8 +30,8 @@ public class SpringDeveloperApplication {
         return IntegrationFlows.from(Files.inboundAdapter(inputDirectory).autoCreateDirectory(true).patternFilter("*.txt"),
                 poller -> poller.poller(pf -> pf.fixedRate(1000)))
                 .channel(this.pubSubChannel())
+                .log(e -> String.format("File with filename %s is inbound", e.getHeaders().get(FileHeaders.FILENAME)))
                 .get();
-
     }
 
     @Bean
@@ -42,10 +42,13 @@ public class SpringDeveloperApplication {
 
     @Bean
     IntegrationFlow outputFlow(
-            @Value("${input-directory:${sys:user.home}/Desktop/out}") File outputDirectory) {
+            @Value("${output-directory:${sys:user.home}/Desktop/out}") File outputDirectory,
+            CountryService countryService
+    ) {
         return IntegrationFlows.from(this.pubSubChannel())
                 .transform(Files.toStringTransformer())
-                .transform(String.class, s -> "Hello, world\n" + s)
+                .transform(String.class, countryService::getPopulation)
+                .transform(Integer.class, Object::toString)
                 .handle(Files.outboundAdapter(outputDirectory)
                         .autoCreateDirectory(true)
                         .fileNameGenerator(m -> (String) m.getHeaders().get(FileHeaders.FILENAME)))
@@ -54,12 +57,13 @@ public class SpringDeveloperApplication {
 
     @Bean
     IntegrationFlow archiveFlow(
-            @Value("${input-directory:${sys:user.home}/Desktop/archive}") File archiveDirectory) {
+            @Value("${archive-directory:${sys:user.home}/Desktop/archive}") File archiveDirectory) {
         return IntegrationFlows.from(this.pubSubChannel())
                 .handle(Files.outboundAdapter(archiveDirectory)
                         .autoCreateDirectory(true)
-                        .deleteSourceFiles(true)
-                        .fileNameGenerator(m -> ((String) m.getHeaders().get(FileHeaders.FILENAME)).split("\\.")[0] + "-archived" + ".txt"))
+//                        .fileNameGenerator(m -> ((String) m.getHeaders().get(FileHeaders.FILENAME)).split("\\.")[0] + "-archived" + ".txt")
+                        .fileNameGenerator(m -> (String) m.getHeaders().get(FileHeaders.FILENAME))
+                )
                 .get();
     }
 }
