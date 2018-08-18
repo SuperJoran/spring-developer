@@ -15,6 +15,8 @@ import org.springframework.messaging.SubscribableChannel;
 import org.springframework.messaging.handler.annotation.Headers;
 
 import java.io.File;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 
 @SpringBootApplication
 public class SpringDeveloperApplication {
@@ -28,7 +30,7 @@ public class SpringDeveloperApplication {
             @Value("${input-directory:${sys:user.home}/Desktop/in}") File inputDirectory
     ) {
         return IntegrationFlows.from(Files.inboundAdapter(inputDirectory).autoCreateDirectory(true).patternFilter("*.txt"),
-                poller -> poller.poller(pf -> pf.fixedRate(1000)))
+                poller -> poller.poller(pf -> pf.fixedRate(10)))
                 .channel(this.pubSubChannel())
                 .log(e -> String.format("File with filename %s is inbound", e.getHeaders().get(FileHeaders.FILENAME)))
                 .get();
@@ -41,13 +43,26 @@ public class SpringDeveloperApplication {
     }
 
     @Bean
+    IntegrationFlow archiveFlow(
+            @Value("${archive-directory:${sys:user.home}/Desktop/archive}") File archiveDirectory) {
+        return IntegrationFlows.from(this.pubSubChannel())
+                .handle(Files.outboundAdapter(archiveDirectory)
+                                .autoCreateDirectory(true)
+                                .fileNameGenerator(m -> (String) m.getHeaders().get(FileHeaders.FILENAME))
+                )
+                .get();
+    }
+
+    @Bean
     IntegrationFlow outputFlow(
             @Value("${output-directory:${sys:user.home}/Desktop/out}") File outputDirectory,
             CountryService countryService
     ) {
         return IntegrationFlows.from(this.pubSubChannel())
+                .channel(MessageChannels.executor(Executors.newCachedThreadPool()))
                 .transform(Files.toStringTransformer())
                 .transform(String.class, countryService::getPopulation)
+                .log(e -> String.format("Country  %s has a population of %d", e.getHeaders().get(FileHeaders.FILENAME), (Integer) e.getPayload()))
                 .transform(Integer.class, Object::toString)
                 .handle(Files.outboundAdapter(outputDirectory)
                         .autoCreateDirectory(true)
@@ -55,15 +70,5 @@ public class SpringDeveloperApplication {
                 .get();
     }
 
-    @Bean
-    IntegrationFlow archiveFlow(
-            @Value("${archive-directory:${sys:user.home}/Desktop/archive}") File archiveDirectory) {
-        return IntegrationFlows.from(this.pubSubChannel())
-                .handle(Files.outboundAdapter(archiveDirectory)
-                        .autoCreateDirectory(true)
-//                        .fileNameGenerator(m -> ((String) m.getHeaders().get(FileHeaders.FILENAME)).split("\\.")[0] + "-archived" + ".txt")
-                        .fileNameGenerator(m -> (String) m.getHeaders().get(FileHeaders.FILENAME))
-                )
-                .get();
-    }
+
 }
